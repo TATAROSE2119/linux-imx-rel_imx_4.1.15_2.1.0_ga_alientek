@@ -15,7 +15,11 @@
 #include <linux/sched.h>
 
 #include "zcomp.h"
+#include "asm/page.h"
 #include "zcomp_lzo.h"
+#include <linux/crypto.h>
+#include <linux/err.h>
+
 #ifdef CONFIG_ZRAM_LZ4_COMPRESS
 #include "zcomp_lz4.h"
 #endif
@@ -43,11 +47,61 @@ struct zcomp_strm_multi {
 	wait_queue_head_t strm_wait;
 };
 
+/* ==========================================================
+ * 骇客魔改区：ZSTD 桥接 Crypto API 的强行注入代码 
+ * ========================================================== */
+
+// 1. 创建 Crypto 引擎实例
+static void *zstd_crypto_create(void) {
+        return crypto_alloc_comp("zstd", 0, 0);
+}
+
+// 2. 销毁实例
+static void zstd_crypto_destroy(void *private) {
+        crypto_free_comp(private);
+}
+
+// 3. 压缩：直接呼叫你写的 zstd_compressor.ko
+static int zstd_crypto_compress(const unsigned char *src, unsigned char *dst,
+                                size_t *dst_len, void *private) {
+        struct crypto_comp *comp = private;
+        unsigned int dlen = PAGE_SIZE*2; // 预留足够空间
+        int ret = crypto_comp_compress(comp, src, PAGE_SIZE, dst, &dlen);
+        *dst_len = dlen;
+        return ret;
+}
+
+// 4. 解压：老内核解压接口居然不传 private 上下文！我们只能用野路子临时申请
+static int zstd_crypto_decompress(const unsigned char *src, size_t src_len,
+                                  unsigned char *dst) {
+        // 强行临时分配一个引擎来解压（虽然有轻微性能损耗，但能完美绕过老 API 限制）
+        struct crypto_comp *comp = crypto_alloc_comp("zstd", 0, 0);
+        unsigned int dlen = PAGE_SIZE;
+        int ret;
+        
+        if (IS_ERR(comp)) return -EINVAL;
+        
+        ret = crypto_comp_decompress(comp, src, src_len, dst, &dlen);
+        crypto_free_comp(comp);
+        return ret;
+}
+
+// 5. 伪造出一张名为 "zstd" 的 zram 白名单身份证！
+static struct zcomp_backend zcomp_zstd = {
+        .compress = zstd_crypto_compress,
+        .decompress = zstd_crypto_decompress,
+        .create = zstd_crypto_create,
+        .destroy = zstd_crypto_destroy,
+        .name = "zstd",
+};
+/* ========================================================== */
+
 static struct zcomp_backend *backends[] = {
 	&zcomp_lzo,
 #ifdef CONFIG_ZRAM_LZ4_COMPRESS
 	&zcomp_lz4,
 #endif
+	&zcomp_zstd,
 	NULL
 };
 

@@ -47,6 +47,8 @@ struct zcomp_strm_multi {
 	wait_queue_head_t strm_wait;
 };
 
+
+#if IS_ENABLED(CONFIG_ZRAM_ZSTD_COMPRESS)
 /* ==========================================================
  * 骇客魔改区：ZSTD 桥接 Crypto API 的强行注入代码 
  * ========================================================== */
@@ -95,13 +97,17 @@ static struct zcomp_backend zcomp_zstd = {
         .name = "zstd",
 };
 /* ========================================================== */
+#endif
+
 
 static struct zcomp_backend *backends[] = {
 	&zcomp_lzo,
 #ifdef CONFIG_ZRAM_LZ4_COMPRESS
 	&zcomp_lz4,
 #endif
+#if IS_ENABLED(CONFIG_ZRAM_ZSTD_COMPRESS)
 	&zcomp_zstd,
+#endif
 	NULL
 };
 

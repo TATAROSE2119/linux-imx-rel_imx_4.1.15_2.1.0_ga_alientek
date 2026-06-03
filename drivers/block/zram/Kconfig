@@ -32,3 +32,9 @@ config ZRAM_DEBUG
 	help
 	  This option adds additional debugging code to the compressed
 	  RAM block device driver.
+config ZRAM_ZSTD_COMPRESS
+	bool "Enable Zstandard algorithm support (CUSTOM)"
+	depends on ZRAM
+	help
+	  This option enables custom Zstd compression algorithm support in zram.
+	  You need to load the zstd_compressor.ko module before using it.
